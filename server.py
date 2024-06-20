@@ -5,6 +5,7 @@ uvicorn server:app --reload --port 8081
 # -------------------------------------------------------------------------------- #
 # -------------------------------- Boilerplate ----------------------------------- #
 # -------------------------------------------------------------------------------- #
+from typing import Annotated
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -49,21 +50,29 @@ def get_db():
 
 
 
+# -------------------------------------------------------------------------------- #
 # ------------------ API Models ***Edit as needed*** ------------------ #
 # -------------------------------------------------------------------------------- #
-class Book(BaseModel):
-    title: str = Field(min_length=1)
+class Book(BaseModel): # to jest api model, nie model z bazy danych (patrz models.py) 
+    title: str = Field(min_length=1) # ten przydaje sie do walidacji api requestów
     author: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=100)
     rating: int = Field(gt=-1, lt=101)
     
+# kolejny api model - do walidacji requestów, nie musi być coupled z modelem z bazy danych
+class Review(BaseModel):
+    review: str = Field(min_length=1, max_length=1000)
+    rating: int = Field(gt=-1, lt=101)
 
-# ------------------ API Endpoints ***Edit as needed*** ------------------ #
+
+# -------------------------------------------------------------------------------- #
+# ------------------ API Endpoints ***Edit as needed*** -------------------------- #
 # -------------------------------------------------------------------------------- #
 
-# ^^^^^^^^^^^^^^^^^^^ standard CRUD operations ^^^^^^^^^^^^^^^^^^^ #
+# _________ _________ _________ _________ _________ _________ _________ _________ #
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ standard CRUD operations ^^^^^^^^^^^^^^^^^^^^^^^^^^ #
 @app.get("/")
-def read_root(db: Session = Depends(get_db)):
+def get_all_books(db: Session = Depends(get_db)):
     return db.query(models.Books).all()
 
 @app.post("/")
@@ -90,7 +99,6 @@ def update_book(book_id: int, book: Book, db: Session = Depends(get_db)):
     db.commit()
     return book
 
-    
 @app.delete("/{book_id}")
 def delete_book(book_id: int, db: Session = Depends(get_db)):
     book_model = db.query(models.Books).filter(models.Books.id == book_id).first()
@@ -100,9 +108,102 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     db.delete(book_model)
     db.commit()
     return f"Book with id {book_id} deleted"
+# _________ _________ _________ _________ _________ _________ _________ _________ #
 
 
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^ websockets ^^^^^^^^^^^^^^^^^^^^^^^^^^ #
+# _________ _________ _________ _________ _________ _________ _________ _________ #
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ more CRUD operations ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ #
+@app.get("/book_reviews/{book_id}")
+def get_book_reviews(book_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Reviews).filter(models.Reviews.book_id == book_id).all()
+
+@app.post("/book_reviews/{book_id}/{user_id}") # common practice is to use path params for (resource) ids 
+def create_book_review(book_id: int, user_id: int, review: Review, db: Session = Depends(get_db)): 
+    # ensure the user and book exist
+    user = db.query(models.Users).filter(models.Users.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User with id {user_id} not found")
+    
+    book = db.query(models.Books).filter(models.Books.id == book_id).first()
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book with id {book_id} not found")
+    
+    review_model = models.Reviews(book_id=book_id, user_id=user_id, review=review.review, rating=review.rating)
+    db.add(review_model)
+    db.commit()
+    return review
+
+@app.get("/book_reviews/{book_id}/average_rating")
+def get_book_average_rating(book_id: int, db: Session = Depends(get_db)):
+    reviews = db.query(models.Reviews).filter(models.Reviews.book_id == book_id).all()
+    if len(reviews) == 0:
+        return {"average_rating": 0}
+    
+    total_rating = sum([review.rating for review in reviews])
+    return {"average_rating": total_rating / len(reviews)}
+
+@app.get("/user_reviews/{user_id}")
+def get_user_reviews(user_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Reviews).filter(models.Reviews.user_id == user_id).all()
+
+class User(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    # email with regex validation
+    email: str = Field(min_length=1, max_length=100, pattern="[^@ \t\r\n]+@[^@ \t\r\n]+\.[^@ \t\r\n]+")
+    password: str = Field(min_length=1, max_length=100)
+
+@app.get("/users")
+def get_users(db: Session = Depends(get_db)):
+    return db.query(models.Users).all()
+
+# endpoint for creating new user
+@app.post("/users")
+def create_user(user: User, db: Session = Depends(get_db)):
+    user_model = models.Users(username=user.username, email=user.email, password=user.password)
+    db.add(user_model)
+    db.commit()
+    return user
+
+# seed the database with some initial data
+@app.get("/seed-database")
+def seed_database(db: Session = Depends(get_db)):
+    # seed the database with some initial
+    user1 = models.Users(username="user1", email="apud123@gmail.com", password="password123")
+    user2 = models.Users(username="Zdzichu", email="zzz@gmail.com", password="hahahaha")
+    db.add(user1)
+    db.add(user2)
+
+    book1 = models.Books(title="Harry Potter", author="J.K. Rowling", description="A book about a wizard", rating=90)
+    book2 = models.Books(title="The Hobbit", author="J.R.R. Tolkien", description="A book about a hobbit", rating=95)
+    db.add(book1)
+    db.add(book2)
+
+    # make sure the book.id and user.id are correct
+    db.commit()
+    print('New user id:', user1.id)
+    print('New user id:', user2.id)
+    print('New book id:', book1.id)
+    print('New book id:', book2.id)
+
+    review1 = models.Reviews(book_id=book1.id, user_id=user1.id, review="Great book", rating=90)
+    review2 = models.Reviews(book_id=book1.id, user_id=user2.id, review="Good book", rating=80)
+    review3 = models.Reviews(book_id=book2.id, user_id=user1.id, review="Great book", rating=90)
+    review4 = models.Reviews(book_id=book2.id, user_id=user2.id, review="Good book", rating=80)
+
+    db.add(review1)
+    db.add(review2)
+    db.add(review3)
+    db.add(review4)
+
+    db.commit()
+    return "Database seeded"
+# _________ _________ _________ _________ _________ _________ _________ _________ #
+
+
+
+
+# _________ _________ _________ _________ _________ _________ _________ _________ #
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ websockets! ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ #
 
 # ----------- typical manager for websockets [DON'T TOUCH] ---------- #
 class ConnectionManager:
@@ -127,6 +228,7 @@ manager = ConnectionManager()
 
 
 # ----------------- API Websocket Endpoints ***Edit as needed*** ----------------- #
+# -------------------------------------------------------------------------------- #
 html2 = """
 <!DOCTYPE html>
 <html>
