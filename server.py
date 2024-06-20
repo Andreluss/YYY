@@ -5,7 +5,8 @@ uvicorn server:app --reload --port 8081
 # -------------------------------------------------------------------------------- #
 # -------------------------------- Boilerplate ----------------------------------- #
 # -------------------------------------------------------------------------------- #
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -60,6 +61,7 @@ class Book(BaseModel):
 # ------------------ API Endpoints ***Edit as needed*** ------------------ #
 # -------------------------------------------------------------------------------- #
 
+# ^^^^^^^^^^^^^^^^^^^ standard CRUD operations ^^^^^^^^^^^^^^^^^^^ #
 @app.get("/")
 def read_root(db: Session = Depends(get_db)):
     return db.query(models.Books).all()
@@ -99,3 +101,87 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     db.commit()
     return f"Book with id {book_id} deleted"
 
+
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^ websockets ^^^^^^^^^^^^^^^^^^^^^^^^^^ #
+
+# ----------- typical manager for websockets [DON'T TOUCH] ---------- #
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = []
+        
+    async def connect(self, websocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        
+    def disconnect(self, websocket):
+        self.active_connections.remove(websocket)
+        
+    async def send_personal_message(self, message, websocket):
+        await websocket.send_text(message)
+        
+    async def broadcast(self, message):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
+
+
+# ----------------- API Websocket Endpoints ***Edit as needed*** ----------------- #
+html2 = """
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Websocket Demo</title>
+           <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+
+    </head>
+    <body>
+    <div class="container mt-3">
+        <h1>FastAPI WebSocket Chat</h1>
+        <h2>Your ID: <span id="ws-id"></span></h2>
+        <form action="" onsubmit="sendMessage(event)">
+            <input type="text" class="form-control" id="messageText" autocomplete="off"/>
+            <button class="btn btn-outline-primary mt-2">Send</button>
+        </form>
+        <ul id='messages' class="mt-5">
+        </ul>
+        
+    </div>
+    
+        <script>
+            var client_id = Date.now() // LLLLLLLMMMMMMAAAAAAAAAAOOOOOOOOOO
+            document.querySelector("#ws-id").textContent = client_id;
+            var ws = new WebSocket(`ws://localhost:8081/ws/${client_id}`);
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                var content = document.createTextNode(event.data)
+                message.appendChild(content)
+                messages.appendChild(message)
+            };
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
+            }
+        </script>
+    </body>
+</html>
+"""
+@app.get("/ws-chat-demo")
+async def get():
+    return HTMLResponse(html2)
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: int):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.send_personal_message(f"You wrote: {data}", websocket)
+            await manager.broadcast(f"Client {client_id} says: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        await manager.broadcast(f"Client {client_id} left the chat")
