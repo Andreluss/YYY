@@ -1,6 +1,7 @@
 """
 Run with the following command:
 uvicorn server:app --reload --port 8081
+seed the database with some initial data by visiting http://localhost:8081/seed-database
 """
 # -------------------------------------------------------------------------------- #
 # -------------------------------- Boilerplate ----------------------------------- #
