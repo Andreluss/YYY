@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String
 from database import Base
 
-# ---------------- Database Models ***Edit as needed*** ---------------- #
+# ---------------- Database Table Models ***Edit as needed*** ---------------- #
 class Books(Base):
     __tablename__ = "books"
 
@@ -10,4 +10,3 @@ class Books(Base):
     author = Column(String)
     description = Column(String)
     rating = Column(Integer)
-    

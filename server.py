@@ -32,7 +32,7 @@ app.add_middleware(
 )
 
 # ------------------ database config [DON'T TOUCH] ------------------ #
-# this will create the db and tables if they don't exist
+# this will create the db and tables if they don't exist (all table models from models.py)
 models.Base.metadata.create_all(bind=engine) 
 
 def get_db():
