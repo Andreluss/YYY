@@ -12,3 +12,7 @@ uvicorn server:app --reload --port 8081
 
 Seed the database with some initial data by visiting http://localhost:8081/seed-database
 
+
+<br/>  
+
+Client repo: [ZZZ](https://github.com/Andreluss/ZZZ).   
